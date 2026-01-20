@@ -82,10 +82,18 @@ needed.
 
 */
 
+static void ensure_array(QPDFObjectHandle &h, const char *action)
+{
+    if (!h.isArray()) {
+        throw py::type_error("pikepdf.Object is not an Array: cannot " +
+                             std::string(action) + " object of type " +
+                             h.getTypeName());
+    }
+}
+
 py::size_t list_range_check(QPDFObjectHandle h, int index)
 {
-    if (!h.isArray())
-        throw py::type_error("object is not an array");
+    ensure_array(h, "check list range");
     if (index < 0)
         index += h.getArrayNItems(); // Support negative indexing
     if (!(0 <= index && index < h.getArrayNItems()))
@@ -112,8 +120,7 @@ bool object_has_key(QPDFObjectHandle h, std::string const &key)
 
 bool array_has_item(QPDFObjectHandle haystack, QPDFObjectHandle needle)
 {
-    if (!haystack.isArray())
-        throw std::logic_error("pikepdf.Object is not an Array"); // LCOV_EXCL_LINE
+    ensure_array(haystack, "check for an item");
 
     for (auto &item : haystack.aitems()) {
         if (objecthandle_equal(item, needle))
@@ -478,6 +485,24 @@ void init_object(py::module_ &m)
                     throw py::type_error("Object is not a real number");
                 return h.getRealValue();
             })
+        .def(
+            "__add__",
+            [](QPDFObjectHandle &h, py::iterable iterable) -> py::object {
+                // We still need this check because 'h' could be a pikepdf.Integer
+                if (!h.isArray()) {
+                    return py::handle(Py_NotImplemented).cast<py::object>();
+                }
+
+                auto result = h.shallowCopy();
+                for (auto const &item : iterable) {
+                    result.appendItem(
+                        objecthandle_encode(py::reinterpret_borrow<py::object>(item)));
+                }
+                return py::cast(result);
+            },
+            py::arg("iterable"),
+            py::is_operator(),
+            "Return a new Array containing elements from both operands.")
         // Arithmetic operations for Integer objects (return native Python types)
         // Integer + int -> int
         .def(
@@ -872,6 +897,24 @@ void init_object(py::module_ &m)
                 auto u_index = list_range_check(h, index);
                 return h.getArrayItem(u_index);
             })
+        .def(
+            "__getitem__",
+            [](QPDFObjectHandle &h, py::slice slice) -> QPDFObjectHandle {
+                ensure_array(h, "slice");
+
+                size_t start, stop, step, slicelength;
+                if (!slice.compute(
+                        h.getArrayNItems(), &start, &stop, &step, &slicelength))
+                    throw py::error_already_set();
+
+                std::vector<QPDFObjectHandle> items;
+                for (size_t i = 0; i < slicelength; ++i) {
+                    items.push_back(h.getArrayItem(static_cast<int>(start)));
+                    start += step;
+                }
+                return QPDFObjectHandle::newArray(items);
+            },
+            "Return a slice of the array as a new pikepdf.Array")
         .def("__getitem__",
             [](QPDFObjectHandle &h, QPDFObjectHandle &name) {
                 return object_get_key(h, name.getName());
@@ -1009,6 +1052,27 @@ void init_object(py::module_ &m)
                 object_del_key(h, name.getName());
             })
         .def("__delitem__",
+            [](QPDFObjectHandle &h, py::slice slice) {
+                ensure_array(h, "delete slice");
+                size_t start, stop, step, slicelength;
+                if (!slice.compute(
+                        h.getArrayNItems(), &start, &stop, &step, &slicelength))
+                    throw py::error_already_set();
+
+                // Collect all target indices first
+                std::vector<size_t> indices;
+                for (size_t i = 0; i < slicelength; ++i) {
+                    indices.push_back(start);
+                    start += step;
+                }
+
+                // Sort indices in descending order and delete
+                std::sort(indices.begin(), indices.end(), std::greater<size_t>());
+                for (auto const &idx : indices) {
+                    h.eraseItem(static_cast<int>(idx));
+                }
+            })
+        .def("__delitem__",
             [](QPDFObjectHandle &h, py::object key) {
                 std::string k = string_from_key(key);
                 object_del_key(h, k);
@@ -1125,6 +1189,134 @@ void init_object(py::module_ &m)
                 }
                 return result;
             })
+        .def(
+            "clear",
+            [](QPDFObjectHandle &h) {
+                ensure_array(h, "clear");
+                while (h.getArrayNItems() > 0) {
+                    h.eraseItem(0);
+                }
+            },
+            "Remove all items from the array.")
+
+        .def(
+            "pop",
+            [](QPDFObjectHandle &h, int index) {
+                ensure_array(h, "pop");
+                auto u_index = list_range_check(h, index);
+                auto item = h.getArrayItem(static_cast<int>(u_index));
+                h.eraseItem(static_cast<int>(u_index));
+                return item;
+            },
+            py::arg("index") = -1,
+            "Remove and return the item at the specified index.")
+
+        .def(
+            "insert",
+            [](QPDFObjectHandle &h, int index, py::object pyitem) {
+                ensure_array(h, "insert");
+                int nitems = h.getArrayNItems();
+                // Pythonic normalization: clamp to bounds rather than throwing range
+                // error
+                if (index < 0)
+                    index += nitems;
+                if (index < 0)
+                    index = 0;
+                if (index > nitems)
+                    index = nitems;
+                h.insertItem(index, objecthandle_encode(pyitem));
+            },
+            py::arg("index"),
+            py::arg("value"),
+            "Insert an object at the specified index.")
+
+        .def(
+            "remove",
+            [](QPDFObjectHandle &h, py::object pyitem) {
+                ensure_array(h, "remove");
+                auto needle = objecthandle_encode(pyitem);
+                int n = h.getArrayNItems();
+                for (int i = 0; i < n; ++i) {
+                    if (objecthandle_equal(h.getArrayItem(i), needle)) {
+                        h.eraseItem(i);
+                        return;
+                    }
+                }
+                throw py::value_error("item not in array");
+            },
+            py::arg("value"),
+            "Remove first occurrence of value.")
+
+        .def(
+            "index",
+            [](QPDFObjectHandle &h, py::object pyitem) {
+                ensure_array(h, "index");
+                auto needle = objecthandle_encode(pyitem);
+                int n = h.getArrayNItems();
+                for (int i = 0; i < n; ++i) {
+                    if (objecthandle_equal(h.getArrayItem(i), needle))
+                        return i;
+                }
+                throw py::value_error("item not in array");
+            },
+            py::arg("value"),
+            "Return first index of value.")
+
+        .def(
+            "count",
+            [](QPDFObjectHandle &h, py::object pyitem) {
+                ensure_array(h, "count");
+                auto needle = objecthandle_encode(pyitem);
+                int count = 0;
+                for (auto const &item : h.aitems()) {
+                    if (objecthandle_equal(item, needle))
+                        count++;
+                }
+                return count;
+            },
+            py::arg("value"),
+            "Return number of occurrences of value.")
+        .def(
+            "reverse",
+            [](QPDFObjectHandle &h) {
+                ensure_array(h, "reverse");
+                int n = h.getArrayNItems();
+                for (int i = 0; i < n / 2; ++i) {
+                    auto left = h.getArrayItem(i);
+                    auto right = h.getArrayItem(n - 1 - i);
+                    h.setArrayItem(i, right);
+                    h.setArrayItem(n - 1 - i, left);
+                }
+            },
+            "Reverse the elements of the array in place.")
+        .def(
+            "copy",
+            [](QPDFObjectHandle &h) { return h.shallowCopy(); },
+            "Return a shallow copy of this PDF object.")
+        .def(
+            "extend",
+            [](QPDFObjectHandle &h, py::iterable iterable) {
+                ensure_array(h, "extend");
+                for (auto const &item : iterable) {
+                    h.appendItem(
+                        objecthandle_encode(py::reinterpret_borrow<py::object>(item)));
+                }
+            },
+            py::arg("iterable"),
+            "Extend the array by appending elements from an iterable.")
+        .def(
+            "__iadd__",
+            [](QPDFObjectHandle &h, py::iterable iterable) {
+                ensure_array(h, "use += to extend");
+                for (auto const &item : iterable) {
+                    h.appendItem(
+                        objecthandle_encode(py::reinterpret_borrow<py::object>(item)));
+                }
+                return h; // __iadd__ must return self
+            },
+            py::arg("iterable"),
+            py::is_operator(),
+            "Extend the array in-place using the += operator.")
         .def("__contains__",
             [](QPDFObjectHandle &h, QPDFObjectHandle &key) {
                 if (h.isArray()) {
@@ -1233,6 +1425,46 @@ void init_object(py::module_ &m)
             })
         .def("__setitem__",
             [](QPDFObjectHandle &h, py::object key, py::object pyvalue) {
+                // 1. Check for slice
+                if (py::isinstance<py::slice>(key)) {
+                    ensure_array(h, "set slice");
+                    auto slice = key.cast<py::slice>();
+                    auto iterable = pyvalue.cast<py::iterable>();
+
+                    size_t start, stop, step, slicelength;
+                    if (!slice.compute(
+                            h.getArrayNItems(), &start, &stop, &step, &slicelength))
+                        throw py::error_already_set();
+
+                    std::vector<QPDFObjectHandle> new_values;
+                    for (auto const &item : iterable) {
+                        new_values.push_back(objecthandle_encode(
+                            py::reinterpret_borrow<py::object>(item)));
+                    }
+
+                    if (step != 1 && new_values.size() != slicelength) {
+                        throw py::value_error("attempt to assign sequence of size " +
+                                              std::to_string(new_values.size()) +
+                                              " to extended slice of size " +
+                                              std::to_string(slicelength));
+                    }
+
+                    if (step == 1) {
+                        for (size_t i = 0; i < slicelength; ++i)
+                            h.eraseItem(static_cast<int>(start));
+                        for (size_t i = 0; i < new_values.size(); ++i) {
+                            h.insertItem(static_cast<int>(start + i), new_values[i]);
+                        }
+                    } else {
+                        for (size_t i = 0; i < slicelength; ++i) {
+                            h.setArrayItem(static_cast<int>(start), new_values[i]);
+                            start += step;
+                        }
+                    }
+                    return;
+                }
+
+                // If not slice: Dictionary key assignment
                 std::string k = string_from_key(key);
                 auto value = objecthandle_encode(pyvalue);
                 object_set_key(h, k, value);
