@@ -275,7 +275,7 @@ class TestArrayMethods:
         assert list(a[::-1]) == [14, 13, 12, 11, 10], "Negative stride read failed"
 
         # Interoperability with Dictionary
-        # This ensures that while a[1:2] works, d["/Key"] still works 
+        # This ensures that while a[1:2] works, d["/Key"] still works
         # and d[slice] raises the correct error.
         d = Dictionary(Foo=a)
         assert list(d.Foo[0:1]) == [10]
@@ -283,3 +283,19 @@ class TestArrayMethods:
         # confirm we hit the right guard
         with pytest.raises(TypeError, match="not an Array: cannot slice"):
             _ = d[1:4]
+
+    def test_error_consistency(self):
+        a = pikepdf.Array(range(5))
+        l = list(range(5))
+
+        try:
+            l[1:3] = 42
+        except TypeError as e_list:
+            msg_list = str(e_list)
+
+        try:
+            a[1:3] = 42
+        except TypeError as e_pike:
+            msg_pike = str(e_pike)
+
+        assert msg_list == msg_pike

@@ -543,14 +543,30 @@ void init_object(py::module_ &m)
             },
             py::is_operator())
         // Fallback for other types (e.g., Decimal) - return NotImplemented
-        .def(
-            "__add__",
+        .def("__add__",
             [](QPDFObjectHandle &h, py::object other) -> py::object {
-                if (!h.isInteger() && !h.isReal())
-                    throw py::type_error("Object is not numeric");
-                return py::handle(Py_NotImplemented).cast<py::object>();
-            },
-            py::is_operator())
+                if (!h.isArray())
+                    return py::cast<py::object>(Py_NotImplemented);
+
+                // We accept py::object to prevent premature pybind11 coercion errors
+                if (!py::isinstance<py::iterable>(other))
+                    return py::cast<py::object>(Py_NotImplemented);
+
+                auto result = QPDFObjectHandle::newArray();
+                int n = h.getArrayNItems();
+                for (int i = 0; i < n; ++i) {
+                    result.appendItem(h.getArrayItem(i));
+                }
+
+                // Constructing the iterable only after we know we are in an array
+                // context
+                py::iterable it = py::reinterpret_borrow<py::iterable>(other);
+                for (auto const &item : it) {
+                    result.appendItem(
+                        objecthandle_encode(py::reinterpret_borrow<py::object>(item)));
+                }
+                return py::cast(result);
+            })
         .def(
             "__radd__",
             [](QPDFObjectHandle &h, py::object other) -> py::object {
@@ -1193,8 +1209,10 @@ void init_object(py::module_ &m)
             "clear",
             [](QPDFObjectHandle &h) {
                 ensure_array(h, "clear");
-                while (h.getArrayNItems() > 0) {
-                    h.eraseItem(0);
+                int n = h.getArrayNItems();
+                // Erase from back-to-front
+                for (int i = n - 1; i >= 0; --i) {
+                    h.eraseItem(i);
                 }
             },
             "Remove all items from the array.")
@@ -1424,50 +1442,69 @@ void init_object(py::module_ &m)
                 h.setArrayItem(u_index, value);
             })
         .def("__setitem__",
-            [](QPDFObjectHandle &h, py::object key, py::object pyvalue) {
-                // 1. Check for slice
+            [](QPDFObjectHandle &h, py::object key, py::object val) {
                 if (py::isinstance<py::slice>(key)) {
                     ensure_array(h, "set slice");
-                    auto slice = key.cast<py::slice>();
-                    auto iterable = pyvalue.cast<py::iterable>();
-
-                    size_t start, stop, step, slicelength;
-                    if (!slice.compute(
+                    if (!py::isinstance<py::iterable>(val)) {
+                        throw py::type_error("can only assign an iterable");
+                    }
+                    Py_ssize_t start, stop, step, slicelength;
+                    if (!py::reinterpret_borrow<py::slice>(key).compute(
                             h.getArrayNItems(), &start, &stop, &step, &slicelength))
                         throw py::error_already_set();
 
-                    std::vector<QPDFObjectHandle> new_values;
-                    for (auto const &item : iterable) {
-                        new_values.push_back(objecthandle_encode(
+                    std::vector<QPDFObjectHandle> new_vals;
+                    py::iterable it = py::reinterpret_borrow<py::iterable>(val);
+                    try {
+                        new_vals.reserve(py::len(val));
+                    } catch (...) {
+                        // Some iterables (generators) don't support len(), which is
+                        // fine
+                    }
+                    for (auto const &item : py::cast<py::iterable>(val)) {
+                        new_vals.push_back(objecthandle_encode(
                             py::reinterpret_borrow<py::object>(item)));
                     }
 
-                    if (step != 1 && new_values.size() != slicelength) {
-                        throw py::value_error("attempt to assign sequence of size " +
-                                              std::to_string(new_values.size()) +
-                                              " to extended slice of size " +
-                                              std::to_string(slicelength));
-                    }
-
-                    if (step == 1) {
-                        for (size_t i = 0; i < slicelength; ++i)
-                            h.eraseItem(static_cast<int>(start));
-                        for (size_t i = 0; i < new_values.size(); ++i) {
-                            h.insertItem(static_cast<int>(start + i), new_values[i]);
+                    if (step != 1) {
+                        if (static_cast<Py_ssize_t>(new_vals.size()) != slicelength) {
+                            // Match the expected test regex exactly:
+                            throw py::value_error(
+                                "attempt to assign sequence of size " +
+                                std::to_string(new_vals.size()) +
+                                " to extended slice of size " +
+                                std::to_string(slicelength));
+                        }
+                        for (Py_ssize_t i = 0; i < slicelength; ++i) {
+                            h.setArrayItem(
+                                static_cast<int>(start + i * step), new_vals[i]);
                         }
                     } else {
-                        for (size_t i = 0; i < slicelength; ++i) {
-                            h.setArrayItem(static_cast<int>(start), new_values[i]);
-                            start += step;
+                        for (Py_ssize_t i = 0; i < slicelength; ++i)
+                            h.eraseItem(static_cast<int>(start));
+                        int insert_at = static_cast<int>(start);
+                        for (auto const &new_obj : new_vals) {
+                            h.insertItem(insert_at++, new_obj);
                         }
                     }
-                    return;
-                }
+                } else if (py::isinstance<py::int_>(key)) {
+                    ensure_array(h, "set index");
+                    int index = key.cast<int>();
+                    int n = h.getArrayNItems();
+                    if (index < 0)
+                        index += n;
+                    if (index < 0 || index >= n)
+                        throw py::index_error("array index out of range");
 
-                // If not slice: Dictionary key assignment
-                std::string k = string_from_key(key);
-                auto value = objecthandle_encode(pyvalue);
-                object_set_key(h, k, value);
+                    h.setArrayItem(index, objecthandle_encode(val));
+                } else {
+                    std::string k =
+                        string_from_key(key); // Validates '/' prefix, throws KeyError
+                    auto encoded_val =
+                        objecthandle_encode(val); // Handles None, throws ValueError
+                    object_set_key(
+                        h, k, encoded_val); // Validates Dictionary/Stream type
+                }
             })
         .def("wrap_in_array", [](QPDFObjectHandle &h) { return h.wrapInArray(); })
         .def("append",
