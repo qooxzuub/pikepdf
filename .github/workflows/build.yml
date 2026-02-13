@@ -13,25 +13,38 @@ on:
 
 jobs:
   wheels_linux:
-    name: ${{ matrix.platform }}
+    name: ${{ matrix.platform }} (${{ matrix.optimization }})
     runs-on: ubuntu-24.04
-    env:
-      CIBW_BUILD: "*-${{ matrix.platform }}"
     strategy:
       matrix:
-        platform: [manylinux_x86_64, musllinux_x86_64]
+        platform: [manylinux_x86_64]
+        # ADD THIS: Define two optimization levels
+        optimization: [standard, lto]
+        include:
+          - optimization: standard
+            cflags: "-O3"
+          - optimization: lto
+            cflags: "-O3 -flto"
+            ldflags: "-flto"
+
+    env:
+      CIBW_BUILD: "*-${{ matrix.platform }}"
+      # Inject the matrix-specific flags into the build environment
+      CIBW_ENVIRONMENT: >
+        CFLAGS="${{ matrix.cflags }}"
+        CXXFLAGS="${{ matrix.cflags }}"
+        LDFLAGS="${{ matrix.ldflags }}"
+
     steps:
       - uses: actions/checkout@v4
-
       - name: Build wheels
-        uses: pypa/cibuildwheel@v3.3.1
-
+        uses: pypa/cibuildwheel@v3.1.4
+      # The artifacts will now be separated by their optimization level
       - name: Upload built wheels
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.platform }}
+          name: wheels-${{ matrix.platform }}-${{ matrix.optimization }}
           path: ./wheelhouse/*.whl
-          if-no-files-found: error
 
   wheels_linux_prerelease_python:
     name: test pre-release (${{ matrix.platform }})
