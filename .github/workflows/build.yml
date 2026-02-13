@@ -18,30 +18,30 @@ jobs:
     strategy:
       matrix:
         platform: [manylinux_x86_64]
-        # ADD THIS: Define two optimization levels
         optimization: [standard, lto]
         include:
           - optimization: standard
             cflags: "-O3"
+            ldflags: ""
           - optimization: lto
             cflags: "-O3 -flto"
             ldflags: "-flto"
 
     env:
       CIBW_BUILD: "*-${{ matrix.platform }}"
-      # Inject the matrix-specific flags into the build environment
-      CIBW_ENVIRONMENT: |
-        QPDF_VERSION=12.3.2
-        QPDF_PATTERN=https://github.com/qpdf/qpdf/releases/download/vVERSION/qpdf-VERSION.tar.gz
-        CFLAGS=${{ matrix.cflags }}
-        CXXFLAGS=${{ matrix.cflags }}
-        LDFLAGS=${{ matrix.ldflags }}
 
     steps:
       - uses: actions/checkout@v4
       - name: Build wheels
         uses: pypa/cibuildwheel@v3.1.4
-      # The artifacts will now be separated by their optimization level
+        env:
+          CIBW_ENVIRONMENT: >
+            QPDF_VERSION=12.3.2
+            QPDF_PATTERN=https://github.com/qpdf/qpdf/releases/download/vVERSION/qpdf-VERSION.tar.gz
+            CFLAGS="${{ matrix.cflags }}"
+            CXXFLAGS="${{ matrix.cflags }}"
+            LDFLAGS="${{ matrix.ldflags }}"
+
       - name: Upload built wheels
         uses: actions/upload-artifact@v4
         with:
