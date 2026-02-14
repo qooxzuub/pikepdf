@@ -27,8 +27,9 @@ jobs:
             before_all: >
               yum install -y epel-release &&
               yum install -y libjpeg-turbo-devel libxml2-devel libxslt-devel zlib-devel openssl-devel libxmp
+            # CORRECTED: Removed quotes around the URL
             env_extra: >
-              QPDF_PATTERN="https://github.com/qpdf/qpdf/releases/download/vVERSION/qpdf-VERSION.tar.gz"
+              QPDF_PATTERN=https://github.com/qpdf/qpdf/releases/download/vVERSION/qpdf-VERSION.tar.gz
 
           - optimization: lto
             cflags: "-O3 -flto"
@@ -50,9 +51,9 @@ jobs:
               -DCMAKE_INSTALL_PREFIX=/usr/local &&
               cmake --build build --target install -j $(nproc)
 
-            # Point setup.py to the local static install
+            # CORRECTED: Removed quotes around the path
             env_extra: >
-              PKG_CONFIG_PATH="/usr/local/lib/pkgconfig"
+              PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
     env:
       CIBW_BUILD: "*-${{ matrix.platform }}"
 
@@ -62,6 +63,7 @@ jobs:
         uses: pypa/cibuildwheel@v3.3.1
         env:
           CIBW_BEFORE_ALL: ${{ matrix.before_all }}
+          # Pipe | style ensures correct parsing of spaces, but requires NO quotes in values
           CIBW_ENVIRONMENT: |
             QPDF_VERSION=12.3.2
             CFLAGS=${{ matrix.cflags }}
