@@ -23,7 +23,9 @@ jobs:
           - optimization: standard
             cflags: "-O3"
             ldflags: ""
+            # Install epel-release first so libxmp can be found
             before_all: >
+              yum install -y epel-release &&
               yum install -y libjpeg-turbo-devel libxml2-devel libxslt-devel zlib-devel openssl-devel libxmp
             env_extra: >
               QPDF_PATTERN="https://github.com/qpdf/qpdf/releases/download/vVERSION/qpdf-VERSION.tar.gz"
@@ -31,7 +33,9 @@ jobs:
           - optimization: lto
             cflags: "-O3 -flto"
             ldflags: "-flto"
+            # LTO build: Install deps, then build QPDF from source
             before_all: >
+              yum install -y epel-release &&
               yum install -y libjpeg-turbo-devel libxml2-devel libxslt-devel zlib-devel openssl-devel libxmp &&
               pip install cmake &&
               curl -L https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2.tar.gz | tar zx &&
@@ -46,7 +50,7 @@ jobs:
               -DCMAKE_INSTALL_PREFIX=/usr/local &&
               cmake --build build --target install -j $(nproc)
 
-            # Don't set QPDF_PATTERN; let setup.py find the system install via pkg-config
+            # Point setup.py to the local static install
             env_extra: >
               PKG_CONFIG_PATH="/usr/local/lib/pkgconfig"
     env:
@@ -58,7 +62,7 @@ jobs:
         uses: pypa/cibuildwheel@v3.3.1
         env:
           CIBW_BEFORE_ALL: ${{ matrix.before_all }}
-          CIBW_ENVIRONMENT: >
+          CIBW_ENVIRONMENT: |
             QPDF_VERSION=12.3.2
             CFLAGS=${{ matrix.cflags }}
             CXXFLAGS=${{ matrix.cflags }}
