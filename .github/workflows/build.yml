@@ -34,11 +34,10 @@ jobs:
               echo 'pip install cmake &&'
               echo 'curl -L https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2.tar.gz | tar zx &&'
               echo 'cd qpdf-12.3.2 &&'
-              # Hybrid: Shared libs allow cross-module LTO without manual transitive linking
-              echo 'cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_STATIC_LIBS=OFF -DREQUIRE_CRYPTO_OPENSSL=ON -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_CXX_FLAGS="-O3 -flto=auto -fPIC" -DCMAKE_C_FLAGS="-O3 -flto=auto -fPIC" -DCMAKE_INSTALL_PREFIX=/usr/local -DBUILD_DOC=OFF -DINSTALL_EXAMPLES=OFF -DINSTALL_MANUAL=OFF &&'
+              # STATIC BUILD: This puts all QPDF code into .a files
+              echo 'cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DBUILD_STATIC_LIBS=ON -DREQUIRE_CRYPTO_OPENSSL=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_CXX_FLAGS="-O3 -flto=auto -fPIC" -DCMAKE_C_FLAGS="-O3 -flto=auto -fPIC" -DCMAKE_INSTALL_PREFIX=/usr/local -DBUILD_DOC=OFF -DINSTALL_EXAMPLES=OFF -DINSTALL_MANUAL=OFF &&'
               echo 'cmake --build build --target libqpdf -j $(nproc) &&'
-              echo 'cmake --install build --component lib &&'
-              echo 'cmake --install build --component dev'
+              echo 'cmake --install build --component lib && cmake --install build --component dev'
               echo 'EOF'
             } >> $GITHUB_ENV
 
@@ -48,7 +47,8 @@ jobs:
               echo 'PKG_CONFIG_PATH=/usr/local/lib/pkgconfig'
               echo 'CFLAGS="-O3 -flto=auto -fPIC"'
               echo 'CXXFLAGS="-O3 -flto=auto -fPIC"'
-              echo 'LDFLAGS="-flto=auto"'
+              # Manually link the dependencies for the static library
+              echo 'LDFLAGS="-flto=auto -Wl,--no-as-needed -ljpeg -lz -lssl -lcrypto"'
               echo 'EOF'
             } >> $GITHUB_ENV
 
