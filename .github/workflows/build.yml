@@ -37,7 +37,8 @@ jobs:
               # Hybrid: Shared libs allow cross-module LTO without manual transitive linking
               echo 'cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_STATIC_LIBS=OFF -DREQUIRE_CRYPTO_OPENSSL=ON -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_CXX_FLAGS="-O3 -flto=auto -fPIC" -DCMAKE_C_FLAGS="-O3 -flto=auto -fPIC" -DCMAKE_INSTALL_PREFIX=/usr/local -DBUILD_DOC=OFF -DINSTALL_EXAMPLES=OFF -DINSTALL_MANUAL=OFF &&'
               echo 'cmake --build build --target libqpdf -j $(nproc) &&'
-              echo 'cmake --install build'
+              echo 'cmake --install build --component lib &&'
+              echo 'cmake --install build --component dev'
               echo 'EOF'
             } >> $GITHUB_ENV
 
