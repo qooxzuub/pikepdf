@@ -1,6 +1,3 @@
-# SPDX-FileCopyrightText: 2023 James R. Barlow
-# SPDX-License-Identifier: MPL-2.0
-
 name: Build and upload to PyPI
 
 on:
@@ -8,8 +5,6 @@ on:
     branches:
       - "**"
   pull_request: {}
-
-# For musllinux support, see note in pyproject.toml
 
 jobs:
   wheels_linux:
@@ -19,60 +14,62 @@ jobs:
       matrix:
         platform: [manylinux_x86_64]
         optimization: [standard, lto]
-        include:
-          - optimization: standard
-            cflags: "-O3"
-            ldflags: ""
-            # Install epel-release first so libxmp can be found
-            before_all: >
-              yum install -y epel-release &&
-              yum install -y libjpeg-turbo-devel libxml2-devel libxslt-devel zlib-devel openssl-devel libxmp
-            # CORRECTED: Removed quotes around the URL
-            env_extra: >
-              QPDF_PATTERN=https://github.com/qpdf/qpdf/releases/download/vVERSION/qpdf-VERSION.tar.gz
-
-          - optimization: lto
-            cflags: "-O3 -flto"
-            ldflags: "-flto"
-            # LTO build: Install deps, then build QPDF from source
-            before_all: >
-              yum install -y epel-release &&
-              yum install -y libjpeg-turbo-devel libxml2-devel libxslt-devel zlib-devel openssl-devel libxmp &&
-              pip install cmake &&
-              curl -L https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2.tar.gz | tar zx &&
-              cd qpdf-12.3.2 &&
-              cmake -S . -B build \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DBUILD_SHARED_LIBS=OFF \
-              -DCMAKE_INSTALL_LIBDIR=lib \
-              -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-              -DCMAKE_CXX_FLAGS="-O3 -flto" \
-              -DCMAKE_C_FLAGS="-O3 -flto" \
-              -DCMAKE_INSTALL_PREFIX=/usr/local &&
-              cmake --build build --target install -j $(nproc)
-
-            # CORRECTED: Removed quotes around the path
-            env_extra: >
-              PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
-    env:
-      CIBW_BUILD: "*-${{ matrix.platform }}"
-
     steps:
       - uses: actions/checkout@v4
+
+      - name: Setup Build Environment
+        shell: bash
+        run: |
+          # 1. Common Configuration
+          # Set the build selector exactly as the original workflow did
+          echo "CIBW_BUILD=*-${{ matrix.platform }}" >> $GITHUB_ENV
+
+          # 2. Optimization Specifics
+          if [[ "${{ matrix.optimization }}" == "lto" ]]; then
+            echo "Configuring LTO build environment..."
+
+            # --- LTO: Override pyproject.toml settings ---
+
+            # Define CIBW_BEFORE_ALL to build QPDF from source with LTO
+            # We use a heredoc (EOF) to safely write the multi-line script to GITHUB_ENV
+            {
+              echo 'CIBW_BEFORE_ALL<<EOF'
+              echo 'yum install -y epel-release &&'
+              echo 'yum install -y libjpeg-turbo-devel libxml2-devel libxslt-devel zlib-devel openssl-devel libxmp &&'
+              echo 'pip install cmake &&'
+              echo 'curl -L https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2.tar.gz | tar zx &&'
+              echo 'cd qpdf-12.3.2 &&'
+              echo 'cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_CXX_FLAGS="-O3 -flto" -DCMAKE_C_FLAGS="-O3 -flto" -DCMAKE_INSTALL_PREFIX=/usr/local &&'
+              echo 'cmake --build build --target install -j $(nproc)'
+              echo 'EOF'
+            } >> $GITHUB_ENV
+
+            # Define CIBW_ENVIRONMENT to inject flags and pkg-config path
+            # Added quotes around flags for safety as requested
+            {
+              echo 'CIBW_ENVIRONMENT<<EOF'
+              echo 'QPDF_VERSION=12.3.2'
+              echo 'PKG_CONFIG_PATH=/usr/local/lib/pkgconfig'
+              echo 'CFLAGS="-O3 -flto"'
+              echo 'CXXFLAGS="-O3 -flto"'
+              echo 'LDFLAGS="-flto"'
+              echo 'EOF'
+            } >> $GITHUB_ENV
+
+          else
+            echo "Standard build: Using upstream defaults."
+            # --- STANDARD: Do nothing ---
+            # By NOT setting CIBW_BEFORE_ALL or CIBW_ENVIRONMENT here, cibuildwheel
+            # will default to reading [tool.cibuildwheel] from pyproject.toml.
+            # This guarantees an identical build to the original upstream configuration.
+          fi
+
       - name: Build wheels
         uses: pypa/cibuildwheel@v3.3.1
-        env:
-          CIBW_BEFORE_ALL: ${{ matrix.before_all }}
-          # Pipe | style ensures correct parsing of spaces, but requires NO quotes in values
-          CIBW_ENVIRONMENT: |
-            QPDF_VERSION=12.3.2
-            CFLAGS=${{ matrix.cflags }}
-            CXXFLAGS=${{ matrix.cflags }}
-            LDFLAGS=${{ matrix.ldflags }}
-            ${{ matrix.env_extra }}
 
       - name: Upload built wheels
         uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.platform }}-${{ matrix.optimization }}
           path: ./wheelhouse/*.whl
+          if-no-files-found: error
