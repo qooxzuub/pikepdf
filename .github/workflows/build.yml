@@ -39,7 +39,7 @@ jobs:
               echo 'pip install cmake &&'
               echo 'curl -L https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2.tar.gz | tar zx &&'
               echo 'cd qpdf-12.3.2 &&'
-              echo 'cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_CXX_FLAGS="-O3 -flto=auto -fPIC" -DCMAKE_C_FLAGS="-O3 -flto=auto -fPIC" -DCMAKE_INSTALL_PREFIX=/usr/local &&'
+              echo 'cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_CXX_FLAGS="-O3 -flto=auto -fPIC" -DCMAKE_C_FLAGS="-O3 -flto=auto -fPIC" -DCMAKE_INSTALL_PREFIX=/usr/local -DBUILD_TOOLS=OFF -DBUILD_TESTING=OFF -DINSTALL_EXAMPLES=OFF -DINSTALL_MANUAL=OFF &&'
               echo 'cmake --build build --target install -j $(nproc)'
               echo 'EOF'
             } >> $GITHUB_ENV
@@ -52,7 +52,7 @@ jobs:
               echo 'PKG_CONFIG_PATH=/usr/local/lib/pkgconfig'
               echo 'CFLAGS="-O3 -flto=auto"'
               echo 'CXXFLAGS="-O3 -flto=auto"'
-              echo 'LDFLAGS="-flto=auto"'
+              echo 'LDFLAGS="-flto=auto -ljpeg -lz -lssl -lcrypto"'
               echo 'EOF'
             } >> $GITHUB_ENV
 
