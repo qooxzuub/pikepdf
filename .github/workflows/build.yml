@@ -39,8 +39,10 @@ jobs:
               echo 'pip install cmake &&'
               echo 'curl -L https://github.com/qpdf/qpdf/releases/download/v12.3.2/qpdf-12.3.2.tar.gz | tar zx &&'
               echo 'cd qpdf-12.3.2 &&'
-              echo 'cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_CXX_FLAGS="-O3 -flto=auto -fPIC" -DCMAKE_C_FLAGS="-O3 -flto=auto -fPIC" -DCMAKE_INSTALL_PREFIX=/usr/local -DBUILD_TOOLS=OFF -DBUILD_TESTING=OFF -DINSTALL_EXAMPLES=OFF -DINSTALL_MANUAL=OFF &&'
-              echo 'cmake --build build --target install -j $(nproc)'
+              # Verified Flags: Build static, require openssl, skip all extras
+              echo 'cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DBUILD_STATIC_LIBS=ON -DREQUIRE_CRYPTO_OPENSSL=ON -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_CXX_FLAGS="-O3 -flto=auto -fPIC" -DCMAKE_C_FLAGS="-O3 -flto=auto -fPIC" -DCMAKE_INSTALL_PREFIX=/usr/local -DBUILD_TOOLS=OFF -DBUILD_TESTING=OFF -DINSTALL_EXAMPLES=OFF -DINSTALL_MANUAL=OFF &&'
+              echo 'cmake --build build --target qpdf_static -j $(nproc) &&'
+              echo 'cmake --install build'
               echo 'EOF'
             } >> $GITHUB_ENV
 
@@ -50,12 +52,15 @@ jobs:
               echo 'CIBW_ENVIRONMENT<<EOF'
               echo 'QPDF_VERSION=12.3.2'
               echo 'PKG_CONFIG_PATH=/usr/local/lib/pkgconfig'
-              echo 'CFLAGS="-O3 -flto=auto"'
-              echo 'CXXFLAGS="-O3 -flto=auto"'
-              echo 'LDFLAGS="-flto=auto -ljpeg -lz -lssl -lcrypto"'
+              # Added -fPIC here just in case pikepdf's build script is stripping it
+              echo 'CFLAGS="-O3 -flto=auto -fPIC"'
+              echo 'CXXFLAGS="-O3 -flto=auto -fPIC"'
+              # The --no-as-needed flag forces the linker to include the libs even if it doesn't 
+              # see an immediate need for them at that point in the command line.
+              echo 'LDFLAGS="-flto=auto -Wl,--no-as-needed -ljpeg -lz -lssl -lcrypto"'
               echo 'EOF'
             } >> $GITHUB_ENV
-
+            
           else
             echo "Standard build: Using upstream defaults."
             # --- STANDARD: Do nothing ---
